@@ -1,5 +1,5 @@
 # ProjectHelium
-Calculator and plotter for probability distribution for helium atom in 3D
+Calculator and plotter for probability distribution for helium ion in 3D
 
 The different orbitals can be achieved by changing quantum numbers. That will be changed in the future for easier orbital manipulation.
 
