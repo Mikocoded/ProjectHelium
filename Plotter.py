@@ -3,7 +3,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 print("Wczytywanie danych...")
-df = pd.read_csv('/home/miko/ProjectAtom/Heprobability.csv')
+df = pd.read_csv('Heprobability.csv')
 
 prog = df['prob'].max() * 0.01
 df = df[df['prob'] > prog]
