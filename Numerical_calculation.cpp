@@ -6,17 +6,6 @@
 
 using namespace std;
 
-// =====================================================================
-// Jednostki atomowe: hbar = m_e = e = 4*pi*eps0 = 1
-// Model: przyblizenie jednoelektronowe (wodoropodobne) z efektywnym
-// ladunkiem jadra Z_eff. Dla helu:
-//   Z = 1.6875   -> standardowy wariacyjny ladunek efektywny dla 1s He
-// Prawdziwy atom helu (2 elektrony, oddzialywanie e-e) wymaga metod
-// wieloelektronowych (Hartree-Fock, CI, QMC) - patrz komentarz na koncu.
-// =====================================================================
-
-// ---------- Stowarzyszone wielomiany Legendre'a P_l^m(x), m>=0 ----------
-// (konwencja z Condon-Shortley phase, zgodna z definicja harmonik sferycznych)
 double assocLegendre(int l, int m, double x) {
     double pmm = 1.0;
     if (m > 0) {
@@ -39,21 +28,17 @@ double assocLegendre(int l, int m, double x) {
     return pll;
 }
 
-// ---------- Znormalizowane harmoniki sferyczne Y_l^m(theta,phi) ----------
 complex<double> sphericalHarmonic(int l, int m, double theta, double phi) {
     int am = abs(m);
     double x = cos(theta);
     double Plm = assocLegendre(l, am, x);
     double norm = sqrt((2.0 * l + 1.0) / (4.0 * M_PI) *
-                        tgamma(l - am + 1.0) / tgamma(l + am + 1.0));
+    tgamma(l - am + 1.0) / tgamma(l + am + 1.0));
     complex<double> Y = norm * Plm * polar(1.0, am * phi);
     if (m < 0) Y = pow(-1.0, am) * conj(Y);
     return Y;
 }
 
-// ---------- Czesc radialna: metoda Numerova dla u(r) = r*R(r) ----------
-// Rownanie:  u''(r) = f(r) * u(r)
-// f(r) = 2*(V(r) - E) + l(l+1)/r^2,   V(r) = -Z/r
 double radialF(double r, double E, int l, double Z) {
     double V = -Z / r;
     return 2.0 * (V - E) + l * (l + 1) / (r * r);
@@ -83,29 +68,33 @@ vector<double> numerovRadial(int Npoints, double h, double rmin, int l, double Z
 
 
 int main() {
-    // ---------------- Parametry orbitalu ----------------
-    int n = 3;          // glowna liczba kwantowa
-    int l = 2;          // orbitalna liczba kwantowa (0=s,1=p,2=d,...)
-    int m = 1;          // magnetyczna liczba kwantowa
-    double Z = 1.6875;  // efektywny ladunek jadra dla 1s helu (wariacyjny)
+    int n = 3;        
+    int l = 2;        
+    int m = 1;          
+    double Z = 2;  
+
+    cout << "Specify quantum numbers" << endl;
+    cout << "Principal quantum number (n):" << endl;
+    cin >> n;
+    cout << "Angular momentum quantum number (l):" << endl;
+    cin >> l;
+    cout << "Magnetic quantum number (m):" << endl;
+    cin >> m;
 
     if (l >= n || abs(m) > l) {
-        cerr << "Niepoprawne liczby kwantowe (wymagane: l<n, |m|<=l)\n";
+        cerr << "Incorrect quantum numbers (required: l<n, |m|<=l)\n";
         return 1;
     }
 
-    // Energia stanu wodoropodobnego (dokladna dla czystego potencjalu Coulomba)
     double E = -(Z * Z) / (2.0 * n * n);
 
-    // ---------------- Siatka radialna ----------------
     double rmin = 1e-4;
-    double rmax = 20.0 / Z * n * n; 
+    double rmax = 20.0 / Z * n * n;
     int Nr = 4000;
     double h = (rmax - rmin) / (Nr - 1);
 
     vector<double> u = numerovRadial(Nr, h, rmin, l, Z, E);
 
-    // Normalizacja: całka |u(r)|^2 dr = 1  <=>  całka |R(r)|^2 r^2 dr = 1
     double normConst = 0.0;
     for (int i = 0; i < Nr; i++) normConst += u[i] * u[i] * h;
     normConst = sqrt(normConst);
@@ -117,8 +106,6 @@ int main() {
         R[i] = u[i] / r;
     }
 
-    // ---------------- Sprawdzenie normalizacji calej funkcji falowej ----------------
-    // Psi(r,theta,phi) = R(r) * Y_l^m(theta,phi)
     int Ntheta = 60, Nphi = 60;
     double dtheta = M_PI / (Ntheta - 1);
     double dphi = 2.0 * M_PI / (Nphi - 1);
@@ -143,26 +130,22 @@ int main() {
 
     cout.setf(ios::fixed);
     cout.precision(6);
-    cout << "=== Model wodoropodobny (He, przyblizenie 1-elektronowe) ===\n";
+    cout << "=== Hydrogenlike model (He, one electron approximation) ===\n";
     cout << "n=" << n << " l=" << l << " m=" << m << "  Z_eff=" << Z << "\n";
     cout << "Energia E = " << E << " Hartree\n";
-    cout << "Calkowite prawdopodobienstwo (powinno wynosic ~1.0): "
-         << totalProb << "\n\n";
+    cout << "Entire probability sum (should be around ~1.0): "
+    << totalProb << "\n\n";
 
-    // ---------------- Przykladowe obliczenie prawdopodobienstwa ----------------
-    // P(r < r0) = całka_0^r0 |R(r)|^2 r^2 dr  (gestosc radialna)
-    double r0 = 1.0; // promien w jednostkach a0
+    double r0 = 1.0;
     double Pcum = 0.0;
     for (int i = 0; i < Nr; i++) {
         double r = rmin + i * h;
         if (r > r0) break;
         Pcum += R[i] * R[i] * r * r * h;
     }
-    cout << "Prawdopodobienstwo znalezienia elektronu w r < " << r0
-         << " a0: " << Pcum << "\n\n";
+    cout << "Probability of finding an electron in r < a0: " << Pcum << "\n\n";
 
-    // ---------------- Zapis gestosci radialnej r^2|R(r)|^2 do pliku ----------------
-    ofstream fout("Heprobability.csv");
+    ofstream fout("HeProbability.csv");
     fout << "r,theta,phi,prob,energy" << "\n";
     for (int i = 0; i < Nr; i += 4) {
         double r = rmin + i * h;
@@ -181,7 +164,7 @@ int main() {
     }
 
     fout.close();
-    cout << "Zapisano prawdopodobienstwo do pliku Heprobability.csv\n";
+    cout << "Saved to HeProbability.csv\n";
 
     return 0;
 }
