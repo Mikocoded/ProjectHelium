@@ -1,0 +1,5 @@
+/home/miko/cppprojects/ProjectHelium/ProjectHelium/build/CMakeFiles/scatter.dir
+/home/miko/cppprojects/ProjectHelium/ProjectHelium/build/CMakeFiles/edit_cache.dir
+/home/miko/cppprojects/ProjectHelium/ProjectHelium/build/CMakeFiles/rebuild_cache.dir
+/home/miko/cppprojects/ProjectHelium/ProjectHelium/build/CMakeFiles/scatter_autogen_timestamp_deps.dir
+/home/miko/cppprojects/ProjectHelium/ProjectHelium/build/CMakeFiles/scatter_autogen.dir

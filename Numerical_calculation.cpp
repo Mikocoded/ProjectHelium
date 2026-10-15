@@ -3,6 +3,18 @@
 #include <vector>
 #include <complex>
 #include <cmath>
+#include <QApplication>
+#include <QHBoxLayout>
+#include <QWidget>
+#include <QtDataVisualization/Q3DScatter>
+#include <QtDataVisualization/QScatter3DSeries>
+#include <QtDataVisualization/QScatterDataProxy>
+#include <QtDataVisualization/QValue3DAxis>
+#include <QColor>
+#include <QVector3D>
+#include <algorithm>
+#include <QtDataVisualization/Q3DTheme> 
+#include <random>
 
 using namespace std;
 
@@ -66,8 +78,20 @@ vector<double> numerovRadial(int Npoints, double h, double rmin, int l, double Z
     return u;
 }
 
+QColor colormap(double t) { 
+    static const double stops[5][3] = {
+        {0, 0, 4}, {87, 16, 110}, {188, 55, 84}, {249, 142, 9}, {252, 255, 164}
+    };
+    t = clamp(t, 0.0, 1.0) * 4.0;
+    int i = min(int(t), 3);
+    double f = t - i;
+    return QColor(int(stops[i][0] + f * (stops[i+1][0] - stops[i][0])),
+                  int(stops[i][1] + f * (stops[i+1][1] - stops[i][1])),
+                  int(stops[i][2] + f * (stops[i+1][2] - stops[i][2])));
+}
 
-int main() {
+
+int main(int argc, char *argv[]) {
     int n = 3;        
     int l = 2;        
     int m = 1;          
@@ -90,8 +114,8 @@ int main() {
 
     double rmin = 1e-4;
     double rmax = 20.0 / Z * n * n;
-    int Nr = 4000;
-    double h = (rmax - rmin) / (Nr - 1);
+    int Nr = 1e5;
+    double h = (rmax - rmin) / (20*Nr - 1);
 
     vector<double> u = numerovRadial(Nr, h, rmin, l, Z, E);
 
@@ -104,67 +128,160 @@ int main() {
     for (int i = 0; i < Nr; i++) {
         double r = rmin + i * h;
         R[i] = u[i] / r;
-    }
+    };
 
-    int Ntheta = 60, Nphi = 60;
-    double dtheta = M_PI / (Ntheta - 1);
-    double dphi = 2.0 * M_PI / (Nphi - 1);
+    struct Pt { float x, y, z, prob; };
+    vector<Pt> pts;
 
-    double totalProb = 0.0;
+    int N = 1e5;
+
+    vector<double> cdf(Nr);
+    double acc = 0.0;
     for (int i = 0; i < Nr; i++) {
         double r = rmin + i * h;
-        double Rr2 = R[i] * R[i];
-        double shellFactor = r * r * h;
-        double angularSum = 0.0;
-        for (int it = 0; it < Ntheta; it++) {
-            double theta = it * dtheta;
-            double s = sin(theta);
-            for (int ip = 0; ip < Nphi; ip++) {
-                double phi = ip * dphi;
-                complex<double> Ylm = sphericalHarmonic(l, m, theta, phi);
-                angularSum += norm(Ylm) * s * dtheta * dphi;
-            }
-        }
-        totalProb += Rr2 * shellFactor * angularSum;
+        acc += R[i] * R[i] * r * r;
+        cdf[i] = acc;
     }
+    for (double &c : cdf) c /= acc;
+
+
+    double fmax = 0.0;
+    for (int i=0; i < 2000; i++){
+        double th = (i + 0.5) * M_PI/2000;
+        fmax = max(fmax, norm(sphericalHarmonic(l, m, th, 0.0))*sin(th));
+    }
+
+    double radInt = 0.0;
+    for (int i=0; i< Nr; i++){
+        double r = rmin + i * h;
+        radInt += R[i]*R[i]*r*r*h;
+    }
+    
+    double angInt = 0.0;
+    double Nth=2000;
+    double dth = M_PI/Nth;
+    for (int k=0; k<Nth; k++){
+        double th = (k+0.5)*dth;
+        angInt += norm(sphericalHarmonic(l,m,th,0.0)) * sin(th) * dth * 2*M_PI;    
+    }
+    double totalProb = radInt * angInt;
+
+    double Pcum = 0.0;
+    double r0 = 1.0;
+    for (int i=0; i < Nr; i++){
+        double r = rmin + i * h;
+        if (r>r0) break;
+        Pcum += R[i]*R[i]*r*r*h;
+    }
+
 
     cout.setf(ios::fixed);
     cout.precision(6);
     cout << "=== Hydrogenlike model (He, one electron approximation) ===\n";
     cout << "n=" << n << " l=" << l << " m=" << m << "  Z_eff=" << Z << "\n";
     cout << "Energia E = " << E << " Hartree\n";
-    cout << "Entire probability sum (should be around ~1.0): "
+    cout << "Entire probability sum (should be around 1.0): "
     << totalProb << "\n\n";
 
-    double r0 = 1.0;
-    double Pcum = 0.0;
-    for (int i = 0; i < Nr; i++) {
-        double r = rmin + i * h;
-        if (r > r0) break;
-        Pcum += R[i] * R[i] * r * r * h;
-    }
     cout << "Probability of finding an electron in r < a0: " << Pcum << "\n\n";
 
+    mt19937 rng(42);
+    uniform_real_distribution<double> U(0.0, 1.0);
+
+    double maxProb = 0.0;
     ofstream fout("HeProbability.csv");
-    fout << "r,theta,phi,prob,energy" << "\n";
-    for (int i = 0; i < Nr; i += 4) {
-        double r = rmin + i * h;
-        for (int it = 0; it<Ntheta; it++){
-            double theta = it * dtheta;
-            for (int ip=0; ip<Nphi; ip++){
-                double phi = ip *dphi;
+    fout << "x,y,z,prob,energy" << "\n";
+    pts.reserve(N);
+    while((int)pts.size()< N){
+        double q = U(rng);
+        int i = lower_bound(cdf.begin(), cdf.end(), q) - cdf.begin();
+        if (i==0) i=1;
+        double f = (q- cdf[i-1])/(cdf[i] - cdf[i-1]);
+        double r = rmin + (i - 1 + f)*h;
 
-                complex<double> Ylm = sphericalHarmonic(l, m, theta, phi);
-                double Y_Sq = norm(Ylm);
-                double Prob = (R[i] * R[i]) * Y_Sq;
+        double theta;
+        do { theta = U(rng) * M_PI; }
+        while (U(rng) * fmax > norm(sphericalHarmonic(l, m, theta, 0.0)) * sin(theta));
+        double phi = U(rng) * 2.0 * M_PI;
 
-                fout << r << "," << theta << "," << phi << "," << Prob << "," << E << "\n";
-            }
-        }
+        double Prob = R[i] * R[i] * norm(sphericalHarmonic(l, m, theta, phi));
+        double x = r * sin(theta) * cos(phi);
+        double y = r * sin(theta) * sin(phi);
+        double z = r * cos(theta);
+
+        pts.push_back({(float)x, (float)y, (float)z, (float)Prob});
+        maxProb = max(maxProb, Prob);
+
+        fout << x << "," << y << "," << z << "," << Prob << "," << E << "\n";
     }
 
     fout.close();
     cout << "Saved to HeProbability.csv\n";
 
-    return 0;
+    int vecsiz = pts.size();
+    cout << vecsiz << endl;
+
+    int plotmaybe;
+
+    cout << "Would you like to open Qt plot? (press 0)" << endl;
+    cin >> plotmaybe;
+
+    if(plotmaybe == 0){
+        QApplication app(argc, argv);
+
+        const int nBins = 24;     
+
+        vector<QScatterDataArray*> bins(nBins);
+        for (auto &b : bins) { b = new QScatterDataArray; }
+
+        vector<float> pv;
+        pv.reserve(pts.size());
+        for (const Pt &p : pts) pv.push_back(p.prob);
+        size_t k = size_t(pv.size() * 0.99);
+        nth_element(pv.begin(), pv.begin() + k, pv.end());
+        double pRef = pv[k];
+        pv.clear();
+        pv.shrink_to_fit();
+
+        const double gamma = 0.4;
+
+        float extent = 0.0f;
+        for (const Pt &p : pts) {
+            double t = pow(min(p.prob / pRef, 1.0), gamma);
+            int b = min(int(t * nBins), nBins - 1);
+            bins[b]->append(QScatterDataItem(QVector3D(p.x, p.z, p.y)));
+            extent = max({extent, fabs(p.x), fabs(p.y), fabs(p.z)});
+        }
+
+        auto *graph = new Q3DScatter();
+        graph->setShadowQuality(QAbstract3DGraph::ShadowQualityNone);
+        graph->activeTheme()->setBackgroundEnabled(true);
+
+        graph->activeTheme()->setType(Q3DTheme::ThemeQt);
+        graph->activeTheme()->setWindowColor(Qt::black);
+        graph->activeTheme()->setBackgroundColor(Qt::black);
+
+        graph->setAspectRatio(1.0);
+        graph->setHorizontalAspectRatio(1.0);
+
+        for (int b = 0; b < nBins; b++) {
+            if (bins[b]->isEmpty()) { delete bins[b]; continue; }
+            auto *series = new QScatter3DSeries;
+            series->dataProxy()->resetArray(bins[b]); 
+            series->setMesh(QAbstract3DSeries::MeshSphere);
+            series->setItemSize(0.02f);
+            series->setColorStyle(Q3DTheme::ColorStyleUniform);
+            series->setBaseColor(colormap((b + 0.5) / nBins));
+            graph->addSeries(series);
+        }
+
+        QWidget *container = QWidget::createWindowContainer(graph);
+        QWidget window;
+        window.resize(1600, 1200);
+        auto *layout = new QHBoxLayout(&window);
+        layout->addWidget(container);
+        window.show();
+
+        return app.exec();
+    }
 }

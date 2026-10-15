@@ -19,14 +19,14 @@ energia = df['energy'].max()
 
 log(f"Plotting {len(df)} points...")
 
-r = df['r'].to_numpy()
-theta = df['theta'].to_numpy()
-phi = df['phi'].to_numpy()
+x = df['x'].to_numpy()
+y = df['y'].to_numpy()
+z = df['z'].to_numpy()
 
 points = np.column_stack((
-    r * np.sin(theta) * np.cos(phi),
-    r * np.sin(theta) * np.sin(phi),
-    r * np.cos(theta),
+    x,
+    y,  
+    z
 ))
 
 prob = df['prob'].to_numpy()
@@ -36,58 +36,84 @@ if deci1 == 0:
 
     if deci1_1 == 0:
         prob_norm = df['prob'].to_numpy() / df['prob'].max()
-        cloud = pv.PolyData(points)
-        cloud['Probability'] = prob_norm
 
+        y = points[:, 1]
+        y_min, y_max = y.min(), y.max()
+        
         pl = pv.Plotter()
-        pl.set_background('black')
-        pl.add_mesh(
-            cloud,
-            scalars='Probability',
-            cmap='inferno',
-            clim = [0,1],
-            opacity='linear',
-            scalar_bar_args={'title': 'Probability', 'color': 'white'},
-        )
+        pl.set_background('white')
+        def slicer(val) -> None:
+            mask = y <= val
+            sub = pv.PolyData(points[mask])
+            sub['Probability'] = prob_norm[mask]
+            pl. add_mesh(
+                sub,
+                scalars='Probability',
+                cmap='inferno',
+                clim = [0,1],
+                opacity='linear',
+                scalar_bar_args={'title': 'Probability', 'color': 'black'},
+                name='prob_cloud',
+            )
         pl.add_text(f'Helium single-electron probability | Energy = {energia} Hartree',
                     font_size=10, color='white')
+        pl.add_slider_widget(slicer, [y_min, y_max], value=y_max, title='Slicer', interaction_event='end')
         log("Rendering")
         pl.show()
     elif deci1_1 == 1:
-        n = 360
-        mins, maxs = points.min(axis=0), points.max(axis=0)
-        hist, edges = np.histogramdd(points, bins=n, range=list(zip(mins, maxs)), weights=prob)
+        lower = np.percentile(points, 0.5, axis=0).astype(np.float32)
+        upper = np.percentile(points, 99.5, axis=0).astype(np.float32)
 
-        hist = gaussian_filter(hist, sigma=1.5)
+        n = 400
 
-        hist_log = np.log1p(hist)    
-        hist_log /= hist_log.max()
+        hist, edges = np.histogramdd(points, bins=n, range=list(zip(lower, upper)), weights=prob.astype(np.float16))
+        hist = hist.astype(np.float32, copy=False)
+        hist = gaussian_filter(hist, sigma=3.0)
 
         nonzero = hist[hist > 0]
-        vmax = np.percentile(nonzero, 99.5)
-        hist_log = np.log1p(hist / vmax * 10) 
-        hist_log /= hist_log.max()
+        vmax = np.percentile(nonzero, 99.5).astype(np.float16)
+        del nonzero
+
+        hist /= (vmax * 10)
+        np.log1p(hist, out=hist)
+        hist /= hist.max()
 
         grid = pv.ImageData()
-        grid.dimensions = np.array(hist_log.shape)
-        grid.origin = mins
-        grid.spacing = (maxs - mins) / (np.array(hist_log.shape) - 1)
-        grid.point_data['Probability'] = hist_log.flatten(order='F')
+        grid.dimensions = np.array(hist.shape)
+        grid.origin = lower
+        grid.spacing = (upper - lower) / (np.array(hist.shape) - 1)
+        grid.point_data['Probability'] = hist.flatten(order='F')
+        del hist
+
+        nx, ny, nz = grid.dimensions
+
+        y_profile = grid.point_data['Probability'].reshape((nx, ny, nz), order='F').sum(axis=(0, 2))
+        threshold = y_profile.max() * 0.5
+        active = np.where(y_profile > threshold)[0]
+        y_lo, y_hi = int(active.min()), int(active.max())
 
         pl = pv.Plotter()
-        pl.set_background('black')
-        pl.add_volume(
-            grid,
-            scalars='Probability',
-            cmap='inferno',
-            clim=[0,1],
-            opacity='sigmoid_6',
-            shade=True,
-            scalar_bar_args={'title': 'Probability', 'color': 'white'},
-        )
+        pl.set_background('white')
+        def slicer(value):
+            cut = int(value)
+            sub = grid.extract_subset([0, nx - 1, 0, cut, 0, nz - 1])
+            pl.add_volume(
+                sub,
+                scalars='Probability',
+                cmap='inferno',
+                clim=[0,1],
+                opacity='linear',
+                shade=True,
+                scalar_bar_args={'title': 'Probability', 'color': 'black'},
+                name='prob_volume',
+                )
+        pl.add_slider_widget(slicer, [0, ny - 1], value=ny - 1, title='Slicer', interaction_event='end')
         pl.add_text(f'Helium single-electron probability | Energy = {energia} Hartree',
-            font_size=10, color='white')
+            font_size=10, color='black')
+        pl.camera.zoom(10.0)
+            # pl.screenshot('helium.png')
         pl.show()
+            # log("Saved helium.png")
         
 
 

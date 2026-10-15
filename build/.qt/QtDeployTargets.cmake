@@ -1,0 +1,2 @@
+set(__QT_DEPLOY_TARGET_scatter_FILE /home/miko/cppprojects/ProjectHelium/ProjectHelium/build/scatter)
+set(__QT_DEPLOY_TARGET_scatter_TYPE EXECUTABLE)
